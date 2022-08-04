@@ -1,11 +1,20 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 )
+
+type Request struct {
+	Compute Location `json:"compute"`
+}
+
+type Location struct {
+	Location string `json:"location"`
+}
 
 func main() {
 	var PTransport = &http.Transport{Proxy: nil}
@@ -32,4 +41,9 @@ func main() {
 
 	fmt.Println(resp.Status)
 	fmt.Println(string(respBody))
+
+	data := Request{}
+	json.Unmarshal(respBody, &data)
+
+	fmt.Printf("Location %v", data.Compute.Location)
 }
