@@ -1,49 +1,134 @@
+/*  The examples in this quickstart are for the Computer Vision API for Microsoft
+ *  Cognitive Services with the following tasks:
+ *  - Recognizing printed and handwritten text with the Batch Read API
+ *	- Recognizing printed text with OCR
+ *
+ *  Prerequisites:
+ *    Import the required libraries. From the command line, you will need to 'go get'
+ *    the azure-sdk-for-go and go-autorest packages from Github.
+ *    For example:
+ *	  go get github.com/Azure/azure-sdk-for-go/services/cognitiveservices/v2.0/computervision
+ *
+ *    Download images faces.jpg, handwritten_text.jpg, objects.jpg, cheese_clipart.png,
+ *    printed_text.jpg, and gray-shirt-logo.jpg, then add to your root folder from here:
+ *    https://github.com/Azure-Samples/cognitive-services-sample-data-files/tree/master/ComputerVision/Images
+ *
+ *  How to run:
+ *	  From command line: go run ComptuerVisionQuickstart.go
+ *
+ *  References:
+ *    - SDK reference:
+ *      https://godoc.org/github.com/Azure/azure-sdk-for-go/services/cognitiveservices/v2.0/computervision
+ *    - Computer Vision documentation:
+ * 		https://docs.microsoft.com/en-us/azure/cognitive-services/computer-vision/index
+ *    - Computer Vision API:
+ *      https://westus.dev.cognitive.microsoft.com/docs/services/5cd27ec07268f6c679a3e641/operations/56f91f2e778daf14a499f21b
+ */
+
+// <snippet_single>
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io/ioutil"
+	"github.com/Azure/azure-sdk-for-go/services/cognitiveservices/v2.0/computervision"
+	"github.com/Azure/go-autorest/autorest"
 	"log"
-	"net/http"
+	"time"
 )
 
-type Request struct {
-	Compute Location `json:"compute"`
-}
-
-type Location struct {
-	Location string `json:"location"`
-}
+// Declare global so don't have to pass it to all of the tasks.
+var computerVisionContext context.Context
 
 func main() {
-	var PTransport = &http.Transport{Proxy: nil}
+	computerVisionKey := "561e0c37e8ad40368249e6d586a1b198"
+	endpointRegion := "eastus"
+	endpointURL := "https://" + endpointRegion + ".api.cognitive.microsoft.com/"
 
-	client := http.Client{Transport: PTransport}
+	/*
+	 * URL images
+	 */
+	printedImageURL := "https://raw.githubusercontent.com/MicrosoftDocs/azure-docs/master/articles/cognitive-services/Computer-vision/Images/readsample.jpg"
+	/*
+	 * END - URL images
+	 */
 
-	req, _ := http.NewRequest("GET", "http://169.254.169.254/metadata/instance", nil)
-	req.Header.Add("Metadata", "True")
+	/*
+	 * Configure the Computer Vision client
+	 */
+	computerVisionClient := computervision.New(endpointURL)
+	computerVisionClient.Authorizer = autorest.NewCognitiveServicesAuthorizer(computerVisionKey)
 
-	q := req.URL.Query()
-	q.Add("format", "json")
-	q.Add("api-version", "2021-02-01")
-	req.URL.RawQuery = q.Encode()
+	computerVisionContext = context.Background()
+	/*
+	 * END - Configure the Computer Vision client
+	 */
 
-	resp, err := client.Do(req)
+	// <snippet_readinmain>
+	// Analyze text in an image, remote
+	BatchReadFileRemoteImage(computerVisionClient, printedImageURL)
+
+}
+
+/*
+ * Batch Read File - remote
+ * A new way to recognize text, with more accurate results than the RecognizeText API call.
+ */
+
+func BatchReadFileRemoteImage(client computervision.BaseClient, remoteImageURL string) {
+	fmt.Println("-----------------------------------------")
+	fmt.Println("BATCH READ FILE - remote")
+	fmt.Println()
+	var remoteImage computervision.ImageURL
+	remoteImage.URL = &remoteImageURL
+
+	// The response contains a field called "Operation-Location",
+	// which is a URL with an ID that you'll use for GetReadOperationResult to access OCR results.
+	textHeaders, err := client.BatchReadFile(computerVisionContext, remoteImage)
 	if err != nil {
-		log.Printf("ERROR> %v", err)
-		log.Println("Errored when sending request to the server")
-		return
+		log.Fatal(err)
 	}
 
-	defer resp.Body.Close()
-	respBody, _ := ioutil.ReadAll(resp.Body)
+	// Use ExtractHeader from the autorest library to get the Operation-Location URL
+	operationLocation := autorest.ExtractHeaderValue("Operation-Location", textHeaders.Response)
 
-	fmt.Println(resp.Status)
-	fmt.Println(string(respBody))
+	numberOfCharsInOperationId := 36
+	operationId := string(operationLocation[len(operationLocation)-numberOfCharsInOperationId : len(operationLocation)])
 
-	data := Request{}
-	json.Unmarshal(respBody, &data)
+	readOperationResult, err := client.GetReadOperationResult(computerVisionContext, operationId)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	fmt.Printf("Location %v", data.Compute.Location)
+	// Wait for the operation to complete.
+	i := 0
+	maxRetries := 10
+
+	fmt.Println("Recognizing text in a remote image with the batch Read API ...")
+	for readOperationResult.Status != computervision.Failed &&
+		readOperationResult.Status != computervision.Succeeded {
+		if i >= maxRetries {
+			break
+		}
+		i++
+
+		fmt.Printf("Server status: %v, waiting %v seconds...\n", readOperationResult.Status, i)
+		time.Sleep(1 * time.Second)
+
+		readOperationResult, err = client.GetReadOperationResult(computerVisionContext, operationId)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// Display the results.
+	fmt.Println()
+	for _, recResult := range *(readOperationResult.RecognitionResults) {
+		for _, line := range *recResult.Lines {
+			fmt.Println(*line.Text)
+		}
+	}
+	fmt.Println()
 }
+
+// </snippet_single>
