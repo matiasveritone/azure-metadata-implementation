@@ -65,6 +65,7 @@ func main() {
 	 */
 
 	// <snippet_readinmain>
+	metadata()
 	// Analyze text in an image, remote
 	BatchReadFileRemoteImage(computerVisionClient, printedImageURL)
 
